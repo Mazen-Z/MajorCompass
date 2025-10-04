@@ -26,7 +26,7 @@ export async function exec<T = any>(sqlText: string, binds: any[] = []): Promise
     conn.execute({
       sqlText,
       binds,
-      complete: function (err, stmt, rows) {
+      complete: function (err, _stmt, rows) {
         if (err) return reject(err);
         resolve(rows as T[]);
       }
