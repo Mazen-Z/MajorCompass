@@ -4,6 +4,7 @@ out
 dist
 coverage
 .env
+.env.local
 .env.*
 .DS_Store
 npm-debug.log*
