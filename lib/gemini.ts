@@ -1,33 +1,48 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Persona, Recommendation } from './types';
 
-const apiKey = process.env.GEMINI_API_KEY;
-const client = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+const apiKey = process.env.GEMINI_API_KEY!;
+const modelId = (process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+
+function buildPrompt(rec: Recommendation, persona?: Persona) {
+  return `
+You are a career+major advisor.
+Student: ${JSON.stringify(persona ?? {})}
+Recommendations: ${JSON.stringify(rec ?? {})}
+
+Write a concise (120–180 words) explanation of why these options fit.
+Mention respected deal-breakers (if any), suggest 2 starter courses and 1 student org,
+and end with 2 actionable next steps.
+`.trim();
+}
 
 export async function summarizeRecommendation(rec: Recommendation, persona?: Persona) {
-  if (!client) return '';
-  const model = client.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  if (!apiKey) {
+    console.warn('[Gemini] Missing GEMINI_API_KEY');
+    return '';
+  }
 
-  const prompt = `
-You are a career+major advisor. Consider the student's profile and the recommended majors/careers.
-Student:
-- Year: ${persona?.year ?? 'unknown'}
-- Interests: ${(persona?.interests ?? []).join(', ') || 'n/a'}
-- Strengths: ${(persona?.strengths ?? []).join(', ') || 'n/a'}
-- Values: ${(persona?.values ?? []).join(', ') || 'n/a'}
-- Deal-breakers: ${(persona?.constraints ?? []).join(', ') || 'n/a'}
-- Study preference: ${persona?.studyPref ?? 'n/a'}
-- Favorites: ${(persona?.favorites ?? []).join(', ') || 'n/a'}
-- Dislikes: ${(persona?.dislikes ?? []).join(', ') || 'n/a'}
-
-Recommendations (scored):
-${JSON.stringify(rec, null, 2)}
-
-Write a concise (120–180 words), encouraging explanation of why these options fit.
-Acknowledge any deal-breakers avoided. Suggest 2 starter courses and 1 student org for the top major.
-End with 2 actionable next steps.
-`.trim();
-
-  const result = await model.generateContent(prompt);
-  return result.response.text();
+  try {
+    const client = new GoogleGenerativeAI(apiKey);
+    const model = client.getGenerativeModel({ model: modelId }); // ✅ 2.5 Flash
+    const result = await model.generateContent(buildPrompt(rec, persona));
+    const text = result?.response?.text?.() ?? '';
+    if (!text) console.warn('[Gemini] Empty response from', modelId);
+    return text;
+  } catch (e: any) {
+    // Helpful diagnostics
+    console.error('[Gemini]', modelId, 'error:', e?.status || '', e?.statusText || '', e?.message || e);
+    // Optional fallback if 2.5 Flash is temporarily unavailable:
+    // try { return await fallbackTo('gemini-1.5-flash', rec, persona, apiKey); } catch {}
+    return '';
+  }
 }
+
+/* Optional local fallback helper (uncomment above to use)
+async function fallbackTo(id: string, rec: Recommendation, persona: Persona | undefined, key: string) {
+  const client = new GoogleGenerativeAI(key);
+  const model = client.getGenerativeModel({ model: id });
+  const res = await model.generateContent(buildPrompt(rec, persona));
+  return res.response?.text?.() ?? '';
+}
+*/

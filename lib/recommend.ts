@@ -1,4 +1,4 @@
-import { exec } from './snowflake';
+import { exec, withTimeout } from './snowflake';
 import {
   DEFAULT_MAJORS,
   DEFAULT_CAREERS,
@@ -44,10 +44,25 @@ function reasonFromCluster(cluster: string) {
   return map[cluster] || 'Good alignment with your self-reported strengths.';
 }
 
-/* ----------------------------- main recommendation ----------------------------- */
+/* ---------------------------------- types ---------------------------------- */
 
-type MajorRow = { code: string; name: string; reason?: string; tags?: string[]; score?: number };
-type CareerRow = { code: string; title: string; reason?: string; tags?: string[]; score?: number };
+type MajorRow = {
+  code: string;
+  name: string;
+  reason?: string;
+  tags?: string[];
+  score?: number;
+};
+
+type CareerRow = {
+  code: string;
+  title: string;
+  reason?: string;
+  tags?: string[];
+  score?: number;
+};
+
+/* ----------------------------- main recommendation ----------------------------- */
 
 export async function getRecommendations(input: QuizInput): Promise<Recommendation> {
   const a = input.answers ?? {};
@@ -73,42 +88,65 @@ export async function getRecommendations(input: QuizInput): Promise<Recommendati
     people: (a.people ?? 3),
     handsOn: (a.handsOn ?? 3),
   };
+
   const top = (Object.entries(clusters) as Array<[keyof typeof clusters, number]>)
     .sort((x, y) => y[1] - x[1])
     .map(([k]) => k as string);
 
-  // 2) fetch from Snowflake (optional) — fall back to defaults on error/empty
-  let majors: MajorRow[] = [...DEFAULT_MAJORS];
-  let careers: CareerRow[] = [...DEFAULT_CAREERS];
+  // 2) fetch from Snowflake with timeout — fall back to defaults on error/timeout
+  let majors: MajorRow[] = DEFAULT_MAJORS.map(m => ({ ...m }));
+  let careers: CareerRow[] = DEFAULT_CAREERS.map(c => ({ ...c }));
 
-  try {
-    const mq = await exec<{ CODE: string; NAME: string; REASON: string; TAGS?: unknown }>(
-      `select code, name, reason, tags from majors where cluster in (?, ?, ?) limit 20`,
-      [top[0], top[1], top[2]]
-    );
-    if (mq?.length) {
-      majors = mq.map(r => ({
-        code: r.CODE,
-        name: r.NAME,
-        reason: r.REASON,
-        tags: parseTags(r.TAGS),
-      }));
-    }
+  const USE_SF = process.env.MC_USE_SNOWFLAKE !== '0';
+  const SF_TIMEOUT = Number(process.env.MC_SNOWFLAKE_TIMEOUT_MS ?? 1200); // ms
 
-    const cq = await exec<{ CODE: string; TITLE: string; REASON: string; TAGS?: unknown }>(
-      `select code, title, reason, tags from careers where cluster in (?, ?, ?) limit 20`,
-      [top[0], top[1], top[2]]
-    );
-    if (cq?.length) {
-      careers = cq.map(r => ({
-        code: r.CODE,
-        title: r.TITLE,
-        reason: r.REASON,
-        tags: parseTags(r.TAGS),
-      }));
+  if (USE_SF) {
+    try {
+      const mq = await withTimeout(
+        exec<{ CODE: string; NAME: string; REASON: string; TAGS?: unknown }>(
+          `select code, name, reason, tags
+             from majors
+            where cluster in (?, ?, ?)
+            limit 20`,
+          [top[0], top[1], top[2]]
+        ),
+        SF_TIMEOUT,
+        'majors'
+      );
+
+      if (mq?.length) {
+        majors = mq.map(r => ({
+          code: r.CODE,
+          name: r.NAME,
+          reason: r.REASON,
+          tags: parseTags(r.TAGS),
+        }));
+      }
+
+      const cq = await withTimeout(
+        exec<{ CODE: string; TITLE: string; REASON: string; TAGS?: unknown }>(
+          `select code, title, reason, tags
+             from careers
+            where cluster in (?, ?, ?)
+            limit 20`,
+          [top[0], top[1], top[2]]
+        ),
+        SF_TIMEOUT,
+        'careers'
+      );
+
+      if (cq?.length) {
+        careers = cq.map(r => ({
+          code: r.CODE,
+          title: r.TITLE,
+          reason: r.REASON,
+          tags: parseTags(r.TAGS),
+        }));
+      }
+    } catch (e) {
+      console.warn('[SF] falling back to local defaults:', (e as Error).message);
+      // keep defaults
     }
-  } catch {
-    // keep defaults
   }
 
   // 3) scoring: clusters + values + interests/strengths
