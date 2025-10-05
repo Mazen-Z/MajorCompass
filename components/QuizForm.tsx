@@ -191,7 +191,6 @@ export default function QuizForm() {
                 onChange={e => setLikert(q.key, Number(e.target.value))}
               />
             </div>
-            <div className="slider-labels"><span>Strongly disagree</span><span>Strongly agree</span></div>
           </div>
         ))}
       </div>

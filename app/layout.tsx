@@ -13,7 +13,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <header className="border-b border-gray-200 dark:border-gray-800">
           <div className="container flex items-center gap-3 py-4">
-            <Image src="/logo.svg" alt="MajorCompass" width={28} height={28} />
+            <Image src="/compass.png" alt="MajorCompass" width={28} height={28} />
             <h1 className="text-xl font-semibold">MajorCompass</h1>
           </div>
         </header>
